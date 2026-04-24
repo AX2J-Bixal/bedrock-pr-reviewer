@@ -1,4 +1,3 @@
-// src/bot.ts
 import {
   BedrockRuntimeClient,
   ConversationRole,
@@ -28,18 +27,16 @@ export class Bot {
   private readonly options: Options
   private readonly bedrockOptions: BedrockOptions
 
-  // Some models (Opus 4.7+) reject temperature parameter
-  private temperatureRejected = false
+  // Track whether temperature should be omitted from requests
+  private temperatureDisabled: boolean
 
   constructor(options: Options, bedrockOptions: BedrockOptions) {
     this.options = options
     this.bedrockOptions = bedrockOptions
     this.client = new BedrockRuntimeClient({})
 
-    // Opus 4.7 doesn't support temperature — causes API to hang
-    if (bedrockOptions.model.includes('opus-4-7')) {
-      this.temperatureRejected = true
-    }
+    // Use config setting, can also be flipped at runtime if model rejects temperature
+    this.temperatureDisabled = options.bedrockDisableTemperature
   }
 
   chat = async (
@@ -82,12 +79,12 @@ export class Bot {
         messages: [
           {
             role: 'user' as ConversationRole,
-            content: [{ text: message }]
+            content: [{text: message}]
           }
         ],
         inferenceConfig: {
           maxTokens: 4096,
-          ...(this.temperatureRejected ? {} : {temperature: 0})
+          ...(this.temperatureDisabled ? {} : {temperature: 0})
         }
       }
 
@@ -121,17 +118,19 @@ export class Bot {
       try {
         return await this.client.send(new ConverseCommand(params))
       } catch (e: any) {
+        // Some models reject temperature parameter with ValidationException.
+        // Flip the flag and rethrow so pRetry rebuilds params without temperature.
         if (
           e?.name === 'ValidationException' &&
           typeof e?.message === 'string' &&
           (e.message.includes('temperature') ||
             e.message.includes('inferenceConfig')) &&
-          !this.temperatureRejected
+          !this.temperatureDisabled
         ) {
           warning(
             `${this.bedrockOptions.model} rejected temperature — retrying without it`
           )
-          this.temperatureRejected = true
+          this.temperatureDisabled = true
         }
         throw e
       }

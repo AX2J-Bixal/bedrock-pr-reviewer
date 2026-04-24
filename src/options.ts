@@ -16,6 +16,7 @@ export class Options {
   bedrockLightModel: string
   bedrockHeavyModel: string
   bedrockModelTemperature: number
+  bedrockDisableTemperature: boolean
   bedrockRetries: number
   bedrockTimeoutMS: number
   bedrockConcurrencyLimit: number
@@ -39,6 +40,7 @@ export class Options {
     bedrockLightModel: string,
     bedrockHeavyModel: string,
     bedrockModelTemperature = '0.0',
+    bedrockDisableTemperature = false,
     bedrockRetries = '3',
     bedrockTimeoutMS = '120000',
     bedrockConcurrencyLimit = '6',
@@ -59,6 +61,7 @@ export class Options {
     this.bedrockLightModel = bedrockLightModel
     this.bedrockHeavyModel = bedrockHeavyModel
     this.bedrockModelTemperature = parseFloat(bedrockModelTemperature)
+    this.bedrockDisableTemperature = bedrockDisableTemperature
     this.bedrockRetries = parseInt(bedrockRetries)
     this.bedrockTimeoutMS = parseInt(bedrockTimeoutMS)
     this.bedrockConcurrencyLimit = parseInt(bedrockConcurrencyLimit)
@@ -84,6 +87,7 @@ export class Options {
     info(`bedrock_light_model: ${this.bedrockLightModel}`)
     info(`bedrock_heavy_model: ${this.bedrockHeavyModel}`)
     info(`bedrock_model_temperature: ${this.bedrockModelTemperature}`)
+    info(`bedrock_disable_temperature: ${this.bedrockDisableTemperature}`)
     info(`bedrock_retries: ${this.bedrockRetries}`)
     info(`bedrock_timeout_ms: ${this.bedrockTimeoutMS}`)
     info(`bedrock_concurrency_limit: ${this.bedrockConcurrencyLimit}`)
@@ -120,11 +124,6 @@ export class PathFilter {
     }
   }
 
-  /**
-   * Returns true if the file should be processed, not ignored.
-   * If there is any inclusion rule set, a file is included when it matches any of inclusion rule.
-   * If there is no inclusion rule set, a file is included when it does not matches any of exclusion rule.
-   */
   check(path: string): boolean {
     if (this.rules.length === 0) {
       return true

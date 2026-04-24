@@ -27,6 +27,7 @@ async function run(): Promise<void> {
     getInput('bedrock_light_model'),
     getInput('bedrock_heavy_model'),
     getInput('bedrock_model_temperature'),
+    getBooleanInput('bedrock_disable_temperature'),
     getInput('bedrock_retries'),
     getInput('bedrock_timeout_ms'),
     getInput('bedrock_concurrency_limit'),

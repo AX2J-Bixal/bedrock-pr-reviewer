@@ -117,7 +117,6 @@ async function pRetry(input, options) {
 }
 
 ;// CONCATENATED MODULE: ./lib/bot.js
-// src/bot.ts
 
 
 
@@ -125,16 +124,14 @@ class Bot {
     client;
     options;
     bedrockOptions;
-    // Some models (Opus 4.7+) reject temperature parameter
-    temperatureRejected = false;
+    // Track whether temperature should be omitted from requests
+    temperatureDisabled;
     constructor(options, bedrockOptions) {
         this.options = options;
         this.bedrockOptions = bedrockOptions;
         this.client = new dist_cjs.BedrockRuntimeClient({});
-        // Opus 4.7 doesn't support temperature — causes API to hang
-        if (bedrockOptions.model.includes('opus-4-7')) {
-            this.temperatureRejected = true;
-        }
+        // Use config setting, can also be flipped at runtime if model rejects temperature
+        this.temperatureDisabled = options.bedrockDisableTemperature;
     }
     chat = async (message, jsonSchema) => {
         let res = ['', {}];
@@ -171,7 +168,7 @@ class Bot {
                 ],
                 inferenceConfig: {
                     maxTokens: 4096,
-                    ...(this.temperatureRejected ? {} : { temperature: 0 })
+                    ...(this.temperatureDisabled ? {} : { temperature: 0 })
                 }
             };
             if (jsonSchema) {
@@ -201,13 +198,15 @@ class Bot {
                 return await this.client.send(new dist_cjs.ConverseCommand(params));
             }
             catch (e) {
+                // Some models reject temperature parameter with ValidationException.
+                // Flip the flag and rethrow so pRetry rebuilds params without temperature.
                 if (e?.name === 'ValidationException' &&
                     typeof e?.message === 'string' &&
                     (e.message.includes('temperature') ||
                         e.message.includes('inferenceConfig')) &&
-                    !this.temperatureRejected) {
+                    !this.temperatureDisabled) {
                     (0,core.warning)(`${this.bedrockOptions.model} rejected temperature — retrying without it`);
-                    this.temperatureRejected = true;
+                    this.temperatureDisabled = true;
                 }
                 throw e;
             }
@@ -1022,7 +1021,7 @@ __nccwpck_require__.r(__webpack_exports__);
 
 
 async function run() {
-    const options = new _options__WEBPACK_IMPORTED_MODULE_2__/* .Options */ .Ei((0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getBooleanInput)('debug'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getBooleanInput)('disable_review'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getBooleanInput)('disable_release_notes'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getBooleanInput)('only_allow_collaborator'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('max_files'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getBooleanInput)('review_simple_changes'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getBooleanInput)('review_comment_lgtm'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getMultilineInput)('path_filters'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('system_message'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('review_file_diff'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('bedrock_light_model'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('bedrock_heavy_model'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('bedrock_model_temperature'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('bedrock_retries'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('bedrock_timeout_ms'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('bedrock_concurrency_limit'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('github_concurrency_limit'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('language'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('ignore_keyword'));
+    const options = new _options__WEBPACK_IMPORTED_MODULE_2__/* .Options */ .Ei((0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getBooleanInput)('debug'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getBooleanInput)('disable_review'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getBooleanInput)('disable_release_notes'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getBooleanInput)('only_allow_collaborator'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('max_files'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getBooleanInput)('review_simple_changes'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getBooleanInput)('review_comment_lgtm'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getMultilineInput)('path_filters'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('system_message'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('review_file_diff'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('bedrock_light_model'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('bedrock_heavy_model'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('bedrock_model_temperature'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getBooleanInput)('bedrock_disable_temperature'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('bedrock_retries'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('bedrock_timeout_ms'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('bedrock_concurrency_limit'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('github_concurrency_limit'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('language'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('ignore_keyword'));
     // print options
     options.print();
     const prompts = new _prompts__WEBPACK_IMPORTED_MODULE_6__/* .Prompts */ .j((0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('summarize'), (0,_actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput)('summarize_release_notes'));
@@ -3223,6 +3222,7 @@ class Options {
     bedrockLightModel;
     bedrockHeavyModel;
     bedrockModelTemperature;
+    bedrockDisableTemperature;
     bedrockRetries;
     bedrockTimeoutMS;
     bedrockConcurrencyLimit;
@@ -3231,7 +3231,7 @@ class Options {
     heavyTokenLimits;
     language;
     ignoreKeyword;
-    constructor(debug, disableReview, disableReleaseNotes, onlyAllowCollaborator, maxFiles = '0', reviewSimpleChanges = false, reviewCommentLGTM = false, pathFilters = null, systemMessage = '', reviewFileDiff = '', bedrockLightModel, bedrockHeavyModel, bedrockModelTemperature = '0.0', bedrockRetries = '3', bedrockTimeoutMS = '120000', bedrockConcurrencyLimit = '6', githubConcurrencyLimit = '6', language = 'en-US', ignoreKeyword = '/reviewbot: ignore') {
+    constructor(debug, disableReview, disableReleaseNotes, onlyAllowCollaborator, maxFiles = '0', reviewSimpleChanges = false, reviewCommentLGTM = false, pathFilters = null, systemMessage = '', reviewFileDiff = '', bedrockLightModel, bedrockHeavyModel, bedrockModelTemperature = '0.0', bedrockDisableTemperature = false, bedrockRetries = '3', bedrockTimeoutMS = '120000', bedrockConcurrencyLimit = '6', githubConcurrencyLimit = '6', language = 'en-US', ignoreKeyword = '/reviewbot: ignore') {
         this.debug = debug;
         this.disableReview = disableReview;
         this.disableReleaseNotes = disableReleaseNotes;
@@ -3245,6 +3245,7 @@ class Options {
         this.bedrockLightModel = bedrockLightModel;
         this.bedrockHeavyModel = bedrockHeavyModel;
         this.bedrockModelTemperature = parseFloat(bedrockModelTemperature);
+        this.bedrockDisableTemperature = bedrockDisableTemperature;
         this.bedrockRetries = parseInt(bedrockRetries);
         this.bedrockTimeoutMS = parseInt(bedrockTimeoutMS);
         this.bedrockConcurrencyLimit = parseInt(bedrockConcurrencyLimit);
@@ -3269,6 +3270,7 @@ class Options {
         (0,core.info)(`bedrock_light_model: ${this.bedrockLightModel}`);
         (0,core.info)(`bedrock_heavy_model: ${this.bedrockHeavyModel}`);
         (0,core.info)(`bedrock_model_temperature: ${this.bedrockModelTemperature}`);
+        (0,core.info)(`bedrock_disable_temperature: ${this.bedrockDisableTemperature}`);
         (0,core.info)(`bedrock_retries: ${this.bedrockRetries}`);
         (0,core.info)(`bedrock_timeout_ms: ${this.bedrockTimeoutMS}`);
         (0,core.info)(`bedrock_concurrency_limit: ${this.bedrockConcurrencyLimit}`);
@@ -3302,11 +3304,6 @@ class PathFilter {
             }
         }
     }
-    /**
-     * Returns true if the file should be processed, not ignored.
-     * If there is any inclusion rule set, a file is included when it matches any of inclusion rule.
-     * If there is no inclusion rule set, a file is included when it does not matches any of exclusion rule.
-     */
     check(path) {
         if (this.rules.length === 0) {
             return true;

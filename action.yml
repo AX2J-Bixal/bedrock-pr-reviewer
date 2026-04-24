@@ -161,6 +161,10 @@ inputs:
     required: false
     description: 'Temperature for GPT model'
     default: '0.05'
+  bedrock_disable_temperature:
+    required: false
+    description: 'Disable temperature parameter for models that do not support it (e.g., Claude Opus 4.7+)'
+    default: 'false'
   bedrock_retries:
     required: false
     description:
