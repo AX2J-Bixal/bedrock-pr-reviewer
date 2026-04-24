@@ -117,6 +117,7 @@ async function pRetry(input, options) {
 }
 
 ;// CONCATENATED MODULE: ./lib/bot.js
+// src/bot.ts
 
 
 
@@ -124,13 +125,18 @@ class Bot {
     client;
     options;
     bedrockOptions;
-    // Opus 4.7+ rejects temperature=0 with ValidationException.
-    // Learn from first failure and omit temperature on subsequent attempts.
+    // Opus 4.7+ and other thinking models reject temperature=0.
+    // Learn from first failure or pre-set for known models.
     temperatureRejected = false;
     constructor(options, bedrockOptions) {
         this.options = options;
         this.bedrockOptions = bedrockOptions;
         this.client = new dist_cjs.BedrockRuntimeClient({});
+        // Opus 4.7+ with adaptive thinking doesn't support temperature.
+        // The API hangs instead of returning an error, so we preemptively disable it.
+        if (bedrockOptions.model.includes('opus-4-7')) {
+            this.temperatureRejected = true;
+        }
     }
     chat = async (message, jsonSchema) => {
         let res = ['', {}];

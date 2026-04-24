@@ -1,3 +1,4 @@
+// src/bot.ts
 import {
   BedrockRuntimeClient,
   ConversationRole,
@@ -28,14 +29,20 @@ export class Bot {
   private readonly options: Options
   private readonly bedrockOptions: BedrockOptions
 
-  // Opus 4.7+ rejects temperature=0 with ValidationException.
-  // Learn from first failure and omit temperature on subsequent attempts.
+  // Opus 4.7+ and other thinking models reject temperature=0.
+  // Learn from first failure or pre-set for known models.
   private temperatureRejected = false
 
   constructor(options: Options, bedrockOptions: BedrockOptions) {
     this.options = options
     this.bedrockOptions = bedrockOptions
     this.client = new BedrockRuntimeClient({})
+
+    // Opus 4.7+ with adaptive thinking doesn't support temperature.
+    // The API hangs instead of returning an error, so we preemptively disable it.
+    if (bedrockOptions.model.includes('opus-4-7')) {
+      this.temperatureRejected = true
+    }
   }
 
   chat = async (
