@@ -28,6 +28,11 @@ export class Bot {
   private readonly options: Options
   private readonly bedrockOptions: BedrockOptions
 
+  // Some newer Bedrock models (observed on Opus 4.7) reject temperature=0
+  // with a ValidationException. We learn from the first failure and reuse
+  // temperature=1 for the life of this Bot instance.
+  private temperatureRejected = false
+
   constructor(options: Options, bedrockOptions: BedrockOptions) {
     this.options = options
     this.bedrockOptions = bedrockOptions
@@ -69,8 +74,10 @@ export class Bot {
       }
     }
 
-    try {
-      const commandParams: ConverseCommandInput = {
+    // Rebuilt on every retry attempt so a flipped `temperatureRejected`
+    // flag is picked up on the next pRetry iteration.
+    const buildParams = (): ConverseCommandInput => {
+      const params: ConverseCommandInput = {
         modelId: this.bedrockOptions.model,
         messages: [
           {
@@ -84,7 +91,7 @@ export class Bot {
         ],
         inferenceConfig: {
           maxTokens: 4096,
-          temperature: 0
+          temperature: this.temperatureRejected ? 1 : 0
         }
       }
 
@@ -103,18 +110,49 @@ export class Bot {
             }
           ]
         }
-        commandParams.toolConfig = toolConfig
+        params.toolConfig = toolConfig
       }
 
-      response = await pRetry(
-        () => this.client.send(new ConverseCommand(commandParams)),
-        {
-          retries: this.options.bedrockRetries
-        }
-      )
-    } catch (e: unknown) {
-      info(`response: ${response}, failed to send message to bedrock: ${e}`)
+      return params
     }
+
+    const attempt = async (): Promise<ConverseCommandOutput> => {
+      try {
+        return await this.client.send(new ConverseCommand(buildParams()))
+      } catch (e: any) {
+        // Bedrock returns ValidationException with the literal string
+        // "temperature is deprecated for this model." on Opus 4.7+ when
+        // temperature=0 is sent. Flip the flag and rethrow so pRetry
+        // rebuilds params with temperature=1 on the next attempt.
+        if (
+          e?.name === 'ValidationException' &&
+          typeof e?.message === 'string' &&
+          e.message.includes('temperature is deprecated') &&
+          !this.temperatureRejected
+        ) {
+          warning(
+            `${this.bedrockOptions.model} rejected temperature=0 — retrying with temperature=1`
+          )
+          this.temperatureRejected = true
+        }
+        throw e
+      }
+    }
+
+    try {
+      response = await pRetry(attempt, {
+        retries: this.options.bedrockRetries
+      })
+    } catch (e: any) {
+      // Was previously `info(\`...: ${e}\`)`, which stringified the error
+      // and dropped name/fault/message/requestId. That's how the Opus 4.7
+      // failure looked like an indefinite hang — a clean ValidationException
+      // was being silently swallowed. Log explicit fields instead.
+      warning(
+        `bedrock send failed: name=${e?.name} message=${e?.message} fault=${e?.$fault} requestId=${e?.$metadata?.requestId}`
+      )
+    }
+
     const end = Date.now()
     info(
       `bedrock sendMessage (including retries) response time: ${end - start} ms`
@@ -141,7 +179,7 @@ export class Bot {
       warning('bedrock response is null')
     }
     if (this.options.debug) {
-      info(`bedrock responses: ${responseText}\n-----------`)
+      info(`bedrock responses: ${responseText}\n—————`)
     }
     const newIds: Ids = {
       parentMessageId: response?.$metadata.requestId,
