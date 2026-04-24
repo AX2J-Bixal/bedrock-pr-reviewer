@@ -28,9 +28,8 @@ export class Bot {
   private readonly options: Options
   private readonly bedrockOptions: BedrockOptions
 
-  // Some newer Bedrock models (observed on Opus 4.7) reject temperature=0
-  // with a ValidationException. We learn from the first failure and reuse
-  // temperature=1 for the life of this Bot instance.
+  // Opus 4.7+ rejects temperature=0 with ValidationException.
+  // Learn from first failure and omit temperature on subsequent attempts.
   private temperatureRejected = false
 
   constructor(options: Options, bedrockOptions: BedrockOptions) {
@@ -57,7 +56,6 @@ export class Bot {
     message: string,
     jsonSchema?: JsonSchema
   ): Promise<[string, Ids]> => {
-    // record timing
     const start = Date.now()
     if (!message) {
       return ['', {}]
@@ -74,8 +72,7 @@ export class Bot {
       }
     }
 
-    // Rebuilt on every retry attempt so a flipped `temperatureRejected`
-    // flag is picked up on the next pRetry iteration.
+    // Rebuilt on every retry so temperatureRejected flag changes take effect
     const buildParams = (): ConverseCommandInput => {
       const params: ConverseCommandInput = {
         modelId: this.bedrockOptions.model,
@@ -91,8 +88,22 @@ export class Bot {
         ],
         inferenceConfig: {
           maxTokens: 4096,
-          temperature: this.temperatureRejected ? 1 : 0
+          ...(this.temperatureRejected ? {} : {temperature: 0})
         }
+      }
+
+      // Opus 4.7+ requires adaptive thinking configuration.
+      // Without this, the Converse API call hangs indefinitely.
+      // See: https://aws.amazon.com/blogs/aws/introducing-anthropics-claude-opus-4-7-model-in-amazon-bedrock/
+      if (this.bedrockOptions.model.includes('opus-4-7')) {
+        params.additionalModelRequestFields = {
+          thinking: {
+            type: 'adaptive',
+            budget_tokens: 10000
+          }
+        }
+        // Thinking models need higher output limit
+        params.inferenceConfig!.maxTokens = 16384
       }
 
       // Add tool configuration if jsonSchema is provided
@@ -117,21 +128,26 @@ export class Bot {
     }
 
     const attempt = async (): Promise<ConverseCommandOutput> => {
+      const params = buildParams()
+
+      if (this.options.debug) {
+        info(`Bedrock request params: ${JSON.stringify(params, null, 2)}`)
+      }
+
       try {
-        return await this.client.send(new ConverseCommand(buildParams()))
+        return await this.client.send(new ConverseCommand(params))
       } catch (e: any) {
-        // Bedrock returns ValidationException with the literal string
-        // "temperature is deprecated for this model." on Opus 4.7+ when
-        // temperature=0 is sent. Flip the flag and rethrow so pRetry
-        // rebuilds params with temperature=1 on the next attempt.
+        // Bedrock returns ValidationException when temperature is not supported.
+        // Flip the flag and rethrow so pRetry rebuilds params without temperature.
         if (
           e?.name === 'ValidationException' &&
           typeof e?.message === 'string' &&
-          e.message.includes('temperature is deprecated') &&
+          (e.message.includes('temperature') ||
+            e.message.includes('inferenceConfig')) &&
           !this.temperatureRejected
         ) {
           warning(
-            `${this.bedrockOptions.model} rejected temperature=0 — retrying with temperature=1`
+            `${this.bedrockOptions.model} rejected temperature — retrying without it`
           )
           this.temperatureRejected = true
         }
@@ -144,10 +160,6 @@ export class Bot {
         retries: this.options.bedrockRetries
       })
     } catch (e: any) {
-      // Was previously `info(\`...: ${e}\`)`, which stringified the error
-      // and dropped name/fault/message/requestId. That's how the Opus 4.7
-      // failure looked like an indefinite hang — a clean ValidationException
-      // was being silently swallowed. Log explicit fields instead.
       warning(
         `bedrock send failed: name=${e?.name} message=${e?.message} fault=${e?.$fault} requestId=${e?.$metadata?.requestId}`
       )
@@ -160,13 +172,11 @@ export class Bot {
 
     let responseText = ''
     if (response?.output?.message != null) {
-      // Check if the response contains a tool use (JSON output)
       const content = response.output.message.content || []
       for (const item of content) {
         if (item.text) {
           responseText += item.text
         } else if (item.toolUse) {
-          // For JSON schema tool use, the input will contain the generated JSON
           try {
             responseText = JSON.stringify(item.toolUse.input)
           } catch (e) {
@@ -178,9 +188,11 @@ export class Bot {
     } else {
       warning('bedrock response is null')
     }
+
     if (this.options.debug) {
-      info(`bedrock responses: ${responseText}\n—————`)
+      info(`bedrock responses: ${responseText}\n-----------`)
     }
+
     const newIds: Ids = {
       parentMessageId: response?.$metadata.requestId,
       conversationId: response?.$metadata.cfId
