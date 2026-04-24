@@ -11,7 +11,6 @@ import {info, warning} from '@actions/core'
 import pRetry from 'p-retry'
 import {BedrockOptions, Options} from './options'
 
-// define type to save parentMessageId and conversationId
 export interface Ids {
   parentMessageId?: string
   conversationId?: string
@@ -29,8 +28,7 @@ export class Bot {
   private readonly options: Options
   private readonly bedrockOptions: BedrockOptions
 
-  // Opus 4.7+ and other thinking models reject temperature.
-  // Pre-set for known models or learn from first failure.
+  // Some models (Opus 4.7+) reject temperature parameter
   private temperatureRejected = false
 
   constructor(options: Options, bedrockOptions: BedrockOptions) {
@@ -38,8 +36,7 @@ export class Bot {
     this.bedrockOptions = bedrockOptions
     this.client = new BedrockRuntimeClient({})
 
-    // Opus 4.7+ with adaptive thinking doesn't support temperature.
-    // The API hangs instead of returning an error, so we preemptively disable it.
+    // Opus 4.7 doesn't support temperature — causes API to hang
     if (bedrockOptions.model.includes('opus-4-7')) {
       this.temperatureRejected = true
     }
@@ -79,18 +76,13 @@ export class Bot {
       }
     }
 
-    // Rebuilt on every retry so temperatureRejected flag changes take effect
     const buildParams = (): ConverseCommandInput => {
       const params: ConverseCommandInput = {
         modelId: this.bedrockOptions.model,
         messages: [
           {
             role: 'user' as ConversationRole,
-            content: [
-              {
-                text: message
-              }
-            ]
+            content: [{ text: message }]
           }
         ],
         inferenceConfig: {
@@ -99,21 +91,6 @@ export class Bot {
         }
       }
 
-      // Opus 4.7+ requires adaptive thinking configuration.
-      // Without this, the Converse API call hangs indefinitely.
-      // Adaptive mode does NOT accept budget_tokens — the model decides automatically.
-      // See: https://aws.amazon.com/blogs/aws/introducing-anthropics-claude-opus-4-7-model-in-amazon-bedrock/
-      if (this.bedrockOptions.model.includes('opus-4-7')) {
-        params.additionalModelRequestFields = {
-          thinking: {
-            type: 'adaptive'
-          }
-        }
-        // Thinking models need higher output limit
-        params.inferenceConfig!.maxTokens = 16384
-      }
-
-      // Add tool configuration if jsonSchema is provided
       if (jsonSchema) {
         const toolConfig: ToolConfiguration = {
           tools: [
@@ -144,8 +121,6 @@ export class Bot {
       try {
         return await this.client.send(new ConverseCommand(params))
       } catch (e: any) {
-        // Bedrock returns ValidationException when temperature is not supported.
-        // Flip the flag and rethrow so pRetry rebuilds params without temperature.
         if (
           e?.name === 'ValidationException' &&
           typeof e?.message === 'string' &&
