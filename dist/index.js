@@ -125,8 +125,8 @@ class Bot {
     client;
     options;
     bedrockOptions;
-    // Opus 4.7+ and other thinking models reject temperature=0.
-    // Learn from first failure or pre-set for known models.
+    // Opus 4.7+ and other thinking models reject temperature.
+    // Pre-set for known models or learn from first failure.
     temperatureRejected = false;
     constructor(options, bedrockOptions) {
         this.options = options;
@@ -183,12 +183,12 @@ class Bot {
             };
             // Opus 4.7+ requires adaptive thinking configuration.
             // Without this, the Converse API call hangs indefinitely.
+            // Adaptive mode does NOT accept budget_tokens — the model decides automatically.
             // See: https://aws.amazon.com/blogs/aws/introducing-anthropics-claude-opus-4-7-model-in-amazon-bedrock/
             if (this.bedrockOptions.model.includes('opus-4-7')) {
                 params.additionalModelRequestFields = {
                     thinking: {
-                        type: 'adaptive',
-                        budget_tokens: 10000
+                        type: 'adaptive'
                     }
                 };
                 // Thinking models need higher output limit
